@@ -495,7 +495,7 @@ class RouterServiceSession(ApplicationSession):
         """
         subscription = self._router._broker._subscription_map.get_observation_by_id(subscription_id)
         if subscription and not is_protected_uri(subscription.uri):
-            events = self._router._broker.get_events(subscription_id, limit)
+            events = self._router._broker._event_store.get_events(subscription_id, limit)
             if events is None:
                 raise ApplicationError(u'wamp.error.history_unavailable', message="event history for the given subscription is unavailable")
             else:

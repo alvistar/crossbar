@@ -51,6 +51,107 @@ import txaio
 __all__ = ('Broker',)
 
 
+class EventStore(object):
+    """
+    Event store in-memory implementation.
+    """
+
+    log = make_logger()
+
+    def __init__(self):
+        # part of event history: map of publication_id -> event dict
+        self._event_store = {}
+
+        # part of event history: map of subscription_id -> list of publication_id
+        self._event_history = {}
+
+    def store_event(self, publisher_id, publication_id, topic, args=None, kwargs=None):
+        """
+        Persist the given event to history.
+
+        :param publisher_id: The session ID of the publisher of the event being persisted.
+        :type publisher_id: int
+        :param publication_id: The publication ID of the event.
+        :type publisher_id: int
+        :param topic: The topic URI of the event.
+        :type topic: unicode
+        :param args: The args payload of the event.
+        :type args: list or None
+        :param kwargs: The kwargs payload of the event.
+        :type kwargs: dict or None
+        """
+        assert(publication_id not in self._event_store)
+        evt = {
+            'publisher': publisher_id,
+            'publication': publication_id,
+            'topic': topic,
+            'args': args,
+            'kwargs': kwargs
+        }
+        self._event_store[publication_id] = evt
+        self.log.debug("event {publication_id} persisted", publication_id=publication_id)
+
+    def store_event_history(self, publication_id, subscription_id):
+        """
+        Persist the given publication history to subscriptions.
+
+        :param publication_id: The ID of the event publication to be persisted.
+        :type publication_id: int
+        :param subscription_id: The ID of the subscription the event (identified by the publication ID),
+            was published to, because the event's topic matched the subscription.
+        :type subscription_id: int
+        """
+        assert(publication_id in self._event_store)
+        if subscription_id not in self._event_history:
+            self._event_history[subscription_id] = deque()
+        self._event_history[subscription_id].append(publication_id)
+        self.log.debug("event {publication_id} history persisted for subscription {subscription_id}", publication_id=publication_id, subscription_id=subscription_id)
+
+    def get_events(self, subscription_id, limit):
+        """
+        Retrieve given number of last events for a given subscription.
+
+        If no history is maintained for the given subscription, None is returned.
+
+        :param subscription_id: The ID of the subscription to retrieve events for.
+        :type subscription_id: int
+        :param limit: Limit number of events returned.
+        :type limit: int
+
+        :return: List of events.
+        :rtype: list or None
+        """
+        if subscription_id not in self._event_history:
+            return None
+        else:
+            s = self._event_history[subscription_id]
+
+            # at most "limit" events in reverse chronological order
+            res = []
+            i = -1
+            if limit > len(s):
+                limit = len(s)
+            for _ in range(limit):
+                res.append(self._event_store[s[i]])
+                i -= 1
+            return res
+
+    def get_event_history(self, subscription_id, from_ts, until_ts):
+        """
+        Retrieve event history for time range for a given subscription.
+
+        If no history is maintained for the given subscription, None is returned.
+
+        :param subscription_id: The ID of the subscription to retrieve events for.
+        :type subscription_id: int
+        :param from_ts: Filter events from this date (string in ISO-8601 format).
+        :type from_ts: unicode
+        :param until_ts: Filter events until this date (string in ISO-8601 format).
+        :type until_ts: unicode
+        """
+        raise Exception("not implemented")
+
+
 class Broker(object):
     """
     Basic WAMP broker.
@@ -87,76 +188,12 @@ class Broker(object):
                                                       publisher_exclusion=True,
                                                       subscription_revocation=True)
 
-        # part of event history: map of publication_id -> event dict
-        self._event_store = {}
+        # store for event history
+        self._event_store = EventStore()
 
-        # part of event history: map of subscription_id -> list of publication_id
-        self._event_history = {}
-
-        # example topic being configured as persistent
-        self._subscription_map.add_observer(self, uri=u'com.example.oncounter', match=u'exact')
-
-    def _persist_event(self, publisher_id, publication_id, topic, args=None, kwargs=None):
-        """
-        Persist the given event to history.
-
-        :param publisher_id: The session ID of the publisher of the event being persisted.
-        :type publisher_id: int
-        :param publication_id: The publication ID of the event.
-        :type publisher_id: int
-        :param topic: The topic URI of the event.
-        :type topic: unicode
-        :param args: The args payload of the event.
-        :type args: list or None
-        :param kwargs: The kwargs payload of the event.
-        :type kwargs: dict or None
-        """
-        assert(publication_id not in self._event_store)
-        evt = {
-            'publisher': publisher_id,
-            'publication': publication_id,
-            'topic': topic,
-            'args': args,
-            'kwargs': kwargs
-        }
-        self._event_store[publication_id] = evt
-        self.log.debug("event {publication_id} persisted", publication_id=publication_id)
-
-    def _persist_event_history(self, publication_id, subscription_id):
-        """
-        Persist the given publication history to subscriptions.
-
-        :param publication_id: The ID of the event publication to be persisted.
-        :type publication_id: int
-        :param subscription_id: The ID of the subscription the event (identified by the publication ID),
-            was published to, because the event's topic matched the subscription.
-        :type subscription_id: int
-        """
-        assert(publication_id in self._event_store)
-        if subscription_id not in self._event_history:
-            self._event_history[subscription_id] = deque()
-        self._event_history[subscription_id].append(publication_id)
-        self.log.debug("event {publication_id} history persisted for subscription {subscription_id}", publication_id=publication_id, subscription_id=subscription_id)
-
-    def get_events(self, subscription_id, limit=10):
-        """
-        Return history of events for given subscription. If no history is maintained
-        for the given subscription, None is returned.
-        """
-        if subscription_id not in self._event_history:
-            return None
-        else:
-            s = self._event_history[subscription_id]
-
-            # at most "limit" events in reverse chronological order
-            res = []
-            i = -1
-            if limit > len(s):
-                limit = len(s)
-            for _ in range(limit):
-                res.append(self._event_store[s[i]])
-                i -= 1
-            return res
+        if self._event_store:
+            # example topic being configured as persistent
+            self._subscription_map.add_observer(self._event_store, uri=u'com.example.oncounter', match=u'exact')
 
     def attach(self, session):
         """
@@ -227,12 +264,12 @@ class Broker(object):
         # check if the event is being persisted by checking if we ourself are among the observers.
         # we've been added to observer lists on subscriptions ultimately from node configuration
         # and during the broker starts up.
-        persist_event = False
+        store_event = False
         for s in subscriptions:
-            if self in s.observers:
-                persist_event = True
+            if self._event_store in s.observers:
+                store_event = True
                 break
-        if persist_event:
+        if store_event:
             self.log.debug("event on topic '{topic}'' is being persisted", topic=publish.topic)
 
         # go on if (otherwise there isn't anything to do anyway):
@@ -241,7 +278,7 @@ class Broker(object):
         #   - the publish is to be acknowledged OR
         #   - the event is to be persistet
         #
-        if subscriptions or publish.acknowledge or persist_event:
+        if subscriptions or publish.acknowledge or store_event:
 
             # validate payload
             #
@@ -276,8 +313,8 @@ class Broker(object):
 
                     # persist event
                     #
-                    if persist_event:
-                        self._persist_event(session._session_id, publication, publish.topic, publish.args, publish.kwargs)
+                    if store_event:
+                        self._event_store.store_event(session._session_id, publication, publish.topic, publish.args, publish.kwargs)
 
                     # send publish acknowledge immediately when requested
                     #
@@ -305,8 +342,8 @@ class Broker(object):
 
                         # persist event history
                         #
-                        if persist_event:
-                            self._persist_event_history(publication, subscription.id)
+                        if store_event:
+                            self._event_store.store_event_history(publication, subscription.id)
 
                         # initial list of receivers are all subscribers on a subscription ..
                         #
@@ -359,7 +396,7 @@ class Broker(object):
                                                 publisher=publisher,
                                                 topic=topic)
                             for receiver in receivers:
-                                if (me_also or receiver != session) and receiver != self:
+                                if (me_also or receiver != session) and receiver != self._event_store:
                                     # the receiving subscriber session
                                     # might have no transport, or no
                                     # longer be joined
