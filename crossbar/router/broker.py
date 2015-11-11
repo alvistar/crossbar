@@ -120,7 +120,7 @@ class Broker(object):
             'kwargs': kwargs
         }
         self._event_store[publication_id] = evt
-        self.log.info("event {publication_id} persisted", publication_id=publication_id)
+        self.log.debug("event {publication_id} persisted", publication_id=publication_id)
 
     def _persist_event_history(self, publication_id, subscription_id):
         """
@@ -136,15 +136,15 @@ class Broker(object):
         if subscription_id not in self._event_history:
             self._event_history[subscription_id] = deque()
         self._event_history[subscription_id].append(publication_id)
-        self.log.info("event {publication_id} history persisted for subscription {subscription_id}", publication_id=publication_id, subscription_id=subscription_id)
+        self.log.debug("event {publication_id} history persisted for subscription {subscription_id}", publication_id=publication_id, subscription_id=subscription_id)
 
     def get_events(self, subscription_id, limit=10):
         """
         Return history of events for given subscription. If no history is maintained
-        for the given subscription, and empty list is returned.
+        for the given subscription, None is returned.
         """
         if subscription_id not in self._event_history:
-            return []
+            return None
         else:
             s = self._event_history[subscription_id]
 
@@ -233,7 +233,7 @@ class Broker(object):
                 persist_event = True
                 break
         if persist_event:
-            self.log.info("event on topic '{topic}'' is being persisted", topic=publish.topic)
+            self.log.debug("event on topic '{topic}'' is being persisted", topic=publish.topic)
 
         # go on if (otherwise there isn't anything to do anyway):
         #
