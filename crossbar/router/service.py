@@ -480,6 +480,12 @@ class RouterServiceSession(ApplicationSession):
         else:
             raise ApplicationError(ApplicationError.NO_SUCH_SUBSCRIPTION, message="no subscription with ID {} exists on this broker".format(subscription_id))
 
+    @wamp.register(u'wamp.history.get_events')
+    def get_event_history(self, topic, limit=10):
+        """
+        """
+        return self._router._broker.get_event_history(topic, limit)
+
     @wamp.register(u'wamp.schema.describe')
     def schema_describe(self, uri=None):
         """

@@ -30,6 +30,8 @@
 
 from __future__ import absolute_import, division, print_function
 
+from collections import deque
+
 from autobahn import util
 from autobahn.wamp import role
 from autobahn.wamp import message
@@ -85,6 +87,30 @@ class Broker(object):
                                                       publisher_exclusion=True,
                                                       subscription_revocation=True)
 
+        self._event_store = {}
+
+    def _persist_event(self, topic, args, kwargs):
+        if topic not in self._event_store:
+            self._event_store[topic] = deque()
+        self._event_store[topic].append({'args': args, 'kwargs': kwargs})
+        if len(self._event_store[topic]) > 10:
+            self._event_store[topic].popleft()
+        self.log.info("persisted event for topic '{topic}'", topic=topic)
+
+    def get_event_history(self, topic, limit=10):
+        if topic not in self._event_store:
+            return []
+        else:
+            s = self._event_store[topic]
+            res = []
+            i = -1
+            if limit > len(s):
+                limit = len(s)
+            for _ in range(limit):
+                res.append(s[i])
+                i -= 1
+            return res
+
     def attach(self, session):
         """
         Implements :func:`crossbar.router.interfaces.IBroker.attach`
@@ -139,22 +165,33 @@ class Broker(object):
         # disallow publication to topics starting with "wamp." and "crossbar." other than for
         # trusted sessions (that are sessions built into Crossbar.io)
         #
+        is_restricted = publish.topic.startswith(u"wamp.") or publish.topic.startswith(u"crossbar.")
         if session._authrole is not None and session._authrole != u"trusted":
-            is_restricted = publish.topic.startswith(u"wamp.") or publish.topic.startswith(u"crossbar.")
             if is_restricted:
                 if publish.acknowledge:
                     reply = message.Error(message.Publish.MESSAGE_TYPE, publish.request, ApplicationError.INVALID_URI, [u"publish with restricted topic URI '{0}'".format(publish.topic)])
                     session._transport.send(reply)
                 return
 
+        # FIXME: check if topic being published to is configured for message persistence
+        #
+        if is_restricted:
+            persist_event = False
+        else:
+            persist_event = True
+
         # get subscriptions active on the topic published to
         #
         subscriptions = self._subscription_map.match_observations(publish.topic)
 
-        # go on if there are any active subscriptions or the publish is to be acknowledged
-        # otherwise there isn't anything to do anyway.
+        # go on if (otherwise there isn't anything to do anyway):
         #
-        if subscriptions or publish.acknowledge:
+        #   - there are any active subscriptions OR
+        #   - the publish is to be acknowledged OR
+        #   - the event is to be persistet
+        #
+        if subscriptions or publish.acknowledge or persist_event:
+
             # validate payload
             #
             try:
@@ -185,6 +222,11 @@ class Broker(object):
                     # new ID for the publication
                     #
                     publication = util.id()
+
+                    # persist event
+                    #
+                    if persist_event:
+                        self._persist_event(publish.topic, publish.args, publish.kwargs)
 
                     # send publish acknowledge immediately when requested
                     #
