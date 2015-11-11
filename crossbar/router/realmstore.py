@@ -120,12 +120,12 @@ class MemoryEventStore(object):
             purged_publication_id = self._event_history[subscription_id].popleft()
 
             # remove the purged publication from event subscriptions
-            #self._event_subscriptions[publication_id].pop(subscription_id)
+            # self._event_subscriptions[publication_id].pop(subscription_id)
 
             self.log.info("event {publication_id} purged fom history for subscription {subscription_id}", publication_id=purged_publication_id, subscription_id=subscription_id)
 
             # if no more event subscriptions exist for publication, remove that too
-            #if not self._event_subscriptions[publication_id]:
+            # if not self._event_subscriptions[publication_id]:
             #    del self._event_subscriptions[publication_id]
             #    del self._event_store[publication_id]
             #    self.log.info("even {publication_id} completey", publication_id=publication_id)
