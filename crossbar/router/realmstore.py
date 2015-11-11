@@ -55,7 +55,7 @@ class MemoryEventStore(object):
         self._config = config or {}
 
         # limit to event history per subscription
-        self._limit = self._config.get('limit', 10)
+        self._limit = self._config.get('limit', 1000)
 
         # map of publication ID -> event dict
         self._event_store = {}
@@ -90,7 +90,7 @@ class MemoryEventStore(object):
             'kwargs': kwargs
         }
         self._event_store[publication_id] = evt
-        self.log.info("event {publication_id} persisted", publication_id=publication_id)
+        self.log.debug("event {publication_id} persisted", publication_id=publication_id)
 
     def store_event_history(self, publication_id, subscription_id):
         """
@@ -107,11 +107,16 @@ class MemoryEventStore(object):
         # for in-memory history, we just use a double-ended queue
         if subscription_id not in self._event_history:
             self._event_history[subscription_id] = deque()
-            self._event_subscriptions[publication_id].add(subscription_id)
 
         # append event to history
         self._event_history[subscription_id].append(publication_id)
-        self.log.info("event {publication_id} history persisted for subscription {subscription_id}", publication_id=publication_id, subscription_id=subscription_id)
+
+        if publication_id not in self._event_subscriptions:
+            self._event_subscriptions[publication_id] = set()
+
+        self._event_subscriptions[publication_id].add(subscription_id)
+
+        self.log.debug("event {publication_id} history persisted for subscription {subscription_id}", publication_id=publication_id, subscription_id=subscription_id)
 
         # purge history if over limit
         if len(self._event_history[subscription_id]) > self._limit:
@@ -120,15 +125,15 @@ class MemoryEventStore(object):
             purged_publication_id = self._event_history[subscription_id].popleft()
 
             # remove the purged publication from event subscriptions
-            # self._event_subscriptions[publication_id].pop(subscription_id)
+            self._event_subscriptions[purged_publication_id].remove(subscription_id)
 
-            self.log.info("event {publication_id} purged fom history for subscription {subscription_id}", publication_id=purged_publication_id, subscription_id=subscription_id)
+            self.log.debug("event {publication_id} purged fom history for subscription {subscription_id}", publication_id=purged_publication_id, subscription_id=subscription_id)
 
             # if no more event subscriptions exist for publication, remove that too
-            # if not self._event_subscriptions[publication_id]:
-            #    del self._event_subscriptions[publication_id]
-            #    del self._event_store[publication_id]
-            #    self.log.info("even {publication_id} completey", publication_id=publication_id)
+            if not self._event_subscriptions[purged_publication_id]:
+                del self._event_subscriptions[purged_publication_id]
+                del self._event_store[purged_publication_id]
+                self.log.debug("event {publication_id} purged completey", publication_id=purged_publication_id)
 
     def get_events(self, subscription_id, limit):
         """
