@@ -88,26 +88,38 @@ class Broker(object):
                                                       subscription_revocation=True)
 
         self._event_store = {}
+        self._event_history = {}
 
-    def _persist_event(self, topic, args, kwargs):
-        if topic not in self._event_store:
-            self._event_store[topic] = deque()
-        self._event_store[topic].append({'args': args, 'kwargs': kwargs})
-        if len(self._event_store[topic]) > 10:
-            self._event_store[topic].popleft()
-        self.log.info("persisted event for topic '{topic}'", topic=topic)
+    def _persist_event(self, publisher_id, publication_id, topic, args, kwargs):
+        assert(publication_id not in self._event_store)
+        evt = {
+            'publisher': publisher_id,
+            'publication': publication_id,
+            'topic': topic,
+            'args': args,
+            'kwargs': kwargs
+        }
+        self._event_store[publication_id] = evt
+        self.log.debug("event {publication_id} persisted", publication_id=publication_id)
 
-    def get_event_history(self, topic, limit=10):
-        if topic not in self._event_store:
+    def _persist_event_history(self, publication_id, subscription_id):
+        assert(publication_id in self._event_store)
+        if subscription_id not in self._event_history:
+            self._event_history[subscription_id] = deque()
+        self._event_history[subscription_id].append(publication_id)
+        self.log.debug("event {publication_id} history persisted for subscription {subscription_id}", publication_id=publication_id, subscription_id=subscription_id)
+
+    def get_events(self, subscription_id, limit=10):
+        if subscription_id not in self._event_history:
             return []
         else:
-            s = self._event_store[topic]
+            s = self._event_history[subscription_id]
             res = []
             i = -1
             if limit > len(s):
                 limit = len(s)
             for _ in range(limit):
-                res.append(s[i])
+                res.append(self._event_store[s[i]])
                 i -= 1
             return res
 
@@ -226,7 +238,7 @@ class Broker(object):
                     # persist event
                     #
                     if persist_event:
-                        self._persist_event(publish.topic, publish.args, publish.kwargs)
+                        self._persist_event(session._session_id, publication, publish.topic, publish.args, publish.kwargs)
 
                     # send publish acknowledge immediately when requested
                     #
@@ -251,6 +263,12 @@ class Broker(object):
                     # iterate over all subscriptions ..
                     #
                     for subscription in subscriptions:
+
+                        # persist event history
+                        #
+                        if persist_event:
+                            self._persist_event_history(publication, subscription.id)
+
                         # initial list of receivers are all subscribers on a subscription ..
                         #
                         receivers = subscription.observers
