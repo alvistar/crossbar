@@ -87,10 +87,30 @@ class Broker(object):
                                                       publisher_exclusion=True,
                                                       subscription_revocation=True)
 
+        # part of event history: map of publication_id -> event dict
         self._event_store = {}
+
+        # part of event history: map of subscription_id -> list of publication_id
         self._event_history = {}
 
-    def _persist_event(self, publisher_id, publication_id, topic, args, kwargs):
+        # example topic being configured as persistent
+        self._subscription_map.add_observer(self, uri=u'com.example.oncounter', match=u'exact')
+
+    def _persist_event(self, publisher_id, publication_id, topic, args=None, kwargs=None):
+        """
+        Persist the given event to history.
+
+        :param publisher_id: The session ID of the publisher of the event being persisted.
+        :type publisher_id: int
+        :param publication_id: The publication ID of the event.
+        :type publisher_id: int
+        :param topic: The topic URI of the event.
+        :type topic: unicode
+        :param args: The args payload of the event.
+        :type args: list or None
+        :param kwargs: The kwargs payload of the event.
+        :type kwargs: dict or None
+        """
         assert(publication_id not in self._event_store)
         evt = {
             'publisher': publisher_id,
@@ -100,20 +120,35 @@ class Broker(object):
             'kwargs': kwargs
         }
         self._event_store[publication_id] = evt
-        self.log.debug("event {publication_id} persisted", publication_id=publication_id)
+        self.log.info("event {publication_id} persisted", publication_id=publication_id)
 
     def _persist_event_history(self, publication_id, subscription_id):
+        """
+        Persist the given publication history to subscriptions.
+
+        :param publication_id: The ID of the event publication to be persisted.
+        :type publication_id: int
+        :param subscription_id: The ID of the subscription the event (identified by the publication ID),
+            was published to, because the event's topic matched the subscription.
+        :type subscription_id: int
+        """
         assert(publication_id in self._event_store)
         if subscription_id not in self._event_history:
             self._event_history[subscription_id] = deque()
         self._event_history[subscription_id].append(publication_id)
-        self.log.debug("event {publication_id} history persisted for subscription {subscription_id}", publication_id=publication_id, subscription_id=subscription_id)
+        self.log.info("event {publication_id} history persisted for subscription {subscription_id}", publication_id=publication_id, subscription_id=subscription_id)
 
     def get_events(self, subscription_id, limit=10):
+        """
+        Return history of events for given subscription. If no history is maintained
+        for the given subscription, and empty list is returned.
+        """
         if subscription_id not in self._event_history:
             return []
         else:
             s = self._event_history[subscription_id]
+
+            # at most "limit" events in reverse chronological order
             res = []
             i = -1
             if limit > len(s):
@@ -177,24 +212,28 @@ class Broker(object):
         # disallow publication to topics starting with "wamp." and "crossbar." other than for
         # trusted sessions (that are sessions built into Crossbar.io)
         #
-        is_restricted = publish.topic.startswith(u"wamp.") or publish.topic.startswith(u"crossbar.")
         if session._authrole is not None and session._authrole != u"trusted":
+            is_restricted = publish.topic.startswith(u"wamp.") or publish.topic.startswith(u"crossbar.")
             if is_restricted:
                 if publish.acknowledge:
                     reply = message.Error(message.Publish.MESSAGE_TYPE, publish.request, ApplicationError.INVALID_URI, [u"publish with restricted topic URI '{0}'".format(publish.topic)])
                     session._transport.send(reply)
                 return
 
-        # FIXME: check if topic being published to is configured for message persistence
-        #
-        if is_restricted:
-            persist_event = False
-        else:
-            persist_event = True
-
         # get subscriptions active on the topic published to
         #
         subscriptions = self._subscription_map.match_observations(publish.topic)
+
+        # check if the event is being persisted by checking if we ourself are among the observers.
+        # we've been added to observer lists on subscriptions ultimately from node configuration
+        # and during the broker starts up.
+        persist_event = False
+        for s in subscriptions:
+            if self in s.observers:
+                persist_event = True
+                break
+        if persist_event:
+            self.log.info("event on topic '{topic}'' is being persisted", topic=publish.topic)
 
         # go on if (otherwise there isn't anything to do anyway):
         #
@@ -302,7 +341,8 @@ class Broker(object):
 
                         # if receivers is non-empty, dispatch event ..
                         #
-                        if receivers:
+                        receivers_cnt = len(receivers) - (1 if self in receivers else 0)
+                        if receivers_cnt:
 
                             # for pattern-based subscriptions, the EVENT must contain
                             # the actual topic being published to
@@ -319,7 +359,7 @@ class Broker(object):
                                                 publisher=publisher,
                                                 topic=topic)
                             for receiver in receivers:
-                                if me_also or receiver != session:
+                                if (me_also or receiver != session) and receiver != self:
                                     # the receiving subscriber session
                                     # might have no transport, or no
                                     # longer be joined
