@@ -43,7 +43,6 @@ from autobahn.wamp.message import \
 from crossbar.router.observation import UriObservationMap
 from crossbar.router import RouterOptions, RouterAction
 from crossbar._logging import make_logger
-from crossbar.router.realmstore import MemoryEventStore
 
 import txaio
 
