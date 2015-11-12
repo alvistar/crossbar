@@ -40,7 +40,7 @@ try:
 except ImportError:
     HAS_LMDB = False
 
-__all__ = ('HAS_LMDB', 'LmdbRealmStore')
+__all__ = ('HAS_LMDB', 'MemoryRealmStore', 'LmdbRealmStore')
 
 
 class MemoryEventStore(object):
@@ -181,13 +181,34 @@ class MemoryEventStore(object):
 
 
 class MemoryRealmStore(object):
+    """
+    """
+
+    event_store = None
+    """
+    """
 
     def __init__(self):
-        pass
+        self.event_store = MemoryEventStore()
+
+
+class LmdbEventStore(object):
+    """
+    """
+
+    def __init__(self, env):
+        self._env = env
+        self._event_history = self._env.open_db('event-history')
 
 
 class LmdbRealmStore(object):
+    """
+    """
+
+    event_store = None
+    """
+    """
 
     def __init__(self, dbfile):
         self._env = lmdb.open(dbfile, max_dbs=16, writemap=True)
-        self._event_history = self._env.open_db('event-history')
+        self.event_store = LmdbEventStore(self._env)

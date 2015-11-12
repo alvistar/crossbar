@@ -87,7 +87,10 @@ class Broker(object):
                                                       subscription_revocation=True)
 
         # store for event history
-        self._event_store = MemoryEventStore()
+        if self._router._store:
+            self._event_store = self._router._store.event_store
+        else:
+            self._event_store = None
 
         if self._event_store:
             # example topic being configured as persistent
@@ -163,10 +166,11 @@ class Broker(object):
         # we've been added to observer lists on subscriptions ultimately from node configuration
         # and during the broker starts up.
         store_event = False
-        for s in subscriptions:
-            if self._event_store in s.observers:
-                store_event = True
-                break
+        if self._event_store:
+            for s in subscriptions:
+                if self._event_store in s.observers:
+                    store_event = True
+                    break
         if store_event:
             self.log.debug("event on topic '{topic}'' is being persisted", topic=publish.topic)
 
