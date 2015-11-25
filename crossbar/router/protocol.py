@@ -306,7 +306,8 @@ class WampWebSocketServerFactory(websocket.WampWebSocketServerFactory):
         :type config: dict
         """
         self.debug_traffic = config.get('debug_traffic', False)
-
+        self.debug = config.get('debug', False)
+        
         options = config.get('options', {})
 
         server = "Crossbar/{}".format(crossbar.__version__)
@@ -352,7 +353,8 @@ class WampWebSocketServerFactory(websocket.WampWebSocketServerFactory):
                                                       serializers=serializers,
                                                       url=config.get('url', None),
                                                       server=server,
-                                                      externalPort=externalPort)
+                                                      externalPort=externalPort,
+                                                      debug_wamp=self.debug))
 
         # Crossbar.io node directory
         self._cbdir = cbdir
